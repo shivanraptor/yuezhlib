@@ -45,7 +45,7 @@ dependencies = [
 Homepage = "https://github.com/shivanraptor/yuezhlib"
 
 [build-system]
-requires = ["hatchling >=1.18", "hatch-vcs"]
+requires = ["hatchling>=1.26.1", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
