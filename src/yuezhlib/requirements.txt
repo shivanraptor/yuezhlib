@@ -1,0 +1,17 @@
+argostranslate==1.9.6
+comet==3.1.0
+datasets==3.3.2
+huggingface_hub==0.29.1
+jieba==0.42.1
+nltk==3.9.1
+numpy==2.3.3
+opencc==1.1.9
+pandas==2.3.2
+python-dotenv==1.1.1
+stopwordsiso==0.6.1
+termcolor==3.1.0
+torch==2.7.1
+tqdm==4.67.1
+transformers==4.49.0
+translators==6.0.1
+wandb==0.22.0

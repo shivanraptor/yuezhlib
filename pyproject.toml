@@ -1,0 +1,58 @@
+[project]
+name = "yuezhlib"
+dynamic = ["version"]
+description = "Library for preprocessing and evaluating datasets, and building models for Cantonese and Written Chinese translations"
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Raptor K", email = "findme@raptor.hk" }]
+keywords = ["evaluation metrics", "machine learning", "trainer", "transformers"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "License :: OSI Approved :: MIT License",
+]
+
+dependencies = [
+    "argostranslate",
+    "bleurt @ git+https://github.com/google-research/BLEURT.git",
+    "datasets",
+    "evaluate",
+    "huggingface_hub",
+    "jieba_fast",
+    "nltk",
+    "numpy",
+    "opencc",
+    "pandas",
+    "pycantonese",
+    "python-dotenv",
+    "setuptools==81.0.0",
+    "stopwordsiso",
+    "tensorflow",
+    "termcolor",
+    "tokenizers",
+    "torch",
+    "tqdm",
+    "transformers",
+    "translators",
+    "wandb"
+]
+
+[project.urls]
+Homepage = "https://github.com/shivanraptor/yuezhlib"
+
+[build-system]
+requires = ["hatchling >=1.18", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/yuezhlib"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
