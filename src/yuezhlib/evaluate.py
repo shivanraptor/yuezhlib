@@ -42,7 +42,16 @@ import jieba_fast as jieba
 import nltk
 import torch
 from nltk.translate.meteor_score import single_meteor_score, meteor_score
+
 ## Version History
+# 0.6.1
+# - Fix BLEURT path
+# - Added light init mode (BLEU only, for single sentence BLEU evaluation)
+# - Fix Pickle path resolution in evaluate_dataset_gen3_old()
+
+# 0.6.0
+# - Add Evaluation Dataset function to generation comparison report between baseline & enhanced model
+
 # 0.5.9
 # - Add a custom function to check BLEU, chrF++, BLEURT and TER
 
@@ -69,8 +78,6 @@ from nltk.translate.meteor_score import single_meteor_score, meteor_score
 # - Added Chinese METEOR as an experimental metric
 # - Changed implementation of METEOR to NLTK's ones, as the evalaute's METEOR implementation is buggy
 
-__version__ = '0.5.9'
-
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -80,15 +87,16 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"  # Disable tokenizer parallelism 
 os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"  # Suppress transformers warnings
 
 class DatasetEvaluator:
+    __version__ = '0.6.1'
+    init_mode_loaded = ''
     def __init__(self, init_mode = 'normal'):
-        logger.info(f"Dataset Evaluator loaded: v{__version__}")
+        logger.info(f"Dataset Evaluator loaded: v{self.__version__}")
         load_dotenv()
-        self._require_gpu()
+        self.init_mode_loaded = init_mode
         self._load_metrics(init_mode)
 
-    def _require_gpu(self):
-        if not torch.cuda.is_available():
-            raise RuntimeError("GPU environment is required, but no CUDA GPU is available.")
+    def _resolve_path(self, path: str) -> str:
+        return os.path.expanduser(os.path.expandvars(path))
 
     def _load_metrics(self, init_mode = 'normal'):
         logger.info(f"Initialization Mode: {init_mode}")
@@ -121,7 +129,10 @@ class DatasetEvaluator:
             del self.metric_bertscore
             self.metric_chrf = evaluate.load("chrf")
             self.metric_ter = evaluate.load("ter")
-            self.metric_bleurt = bleurt_scorer.BleurtScorer("BLEURT-20")
+            self.metric_bleurt = bleurt_scorer.BleurtScorer(self._resolve_path("~/BLEURT-20"))
+        elif init_mode == "light":
+            del self.metric_bertscore
+            # leave only BLEU
     
     def is_pickle_file(self, filepath):
         """Check if import file is pickle format."""
@@ -172,6 +183,9 @@ class DatasetEvaluator:
         # Formula: 0.4 x COMET + 0.4 x BertScore + 0.2 x sacreBLEU
 
         # pre-test check
+        if self.init_mode_loaded == "light":
+            logger.error("Init Mode needs to set to gen3")
+            return False
         if not zh or not ref or not src:
             logger.error("Either zh, ref or src is empty or not set")
             return False
@@ -195,6 +209,11 @@ class DatasetEvaluator:
         
     def evaluate_single(self, zh, ref, yue=''): # source language is for future use
         """Evaluate a single set of sentence pairs using various evaluation metrics."""
+
+        # pre-test check
+        if self.init_mode_loaded == "light":
+            logger.error("Init Mode needs to set to gen3")
+            return False
         
         # for METEOR implementation
         meteor_pred = self._chinese_tokenize(zh)
@@ -228,9 +247,16 @@ class DatasetEvaluator:
             'character': round(character_result["cer_score"], 4)
         }
 
+    def evaluate_single_bleu(self, zh, ref):
+        bleu_result = self.metric_bleu.compute(predictions=[zh], references=[[ref]], tokenize="zh")
+        return round(bleu_result['score'], 4)
+
     def evaluate_dataset_composite_v2(self, pickle_path):
         """Evaluate dataset using composite score."""
-        # Pre-evaluate checking
+        # pre-test check
+        if self.init_mode_loaded == "light":
+            logger.error("Init Mode needs to set to gen3")
+            return False
         if not os.path.exists(pickle_path):
             logger.error("Specified file does not exist.")
             return False
@@ -267,7 +293,10 @@ class DatasetEvaluator:
         
     def evaluate_dataset_composite(self, pickle_path):
         """Evaluate dataset using composite score."""
-        # Pre-evaluate checking
+        # pre-test check
+        if self.init_mode_loaded == "light":
+            logger.error("Init Mode needs to set to gen3")
+            return False
         if not os.path.exists(pickle_path):
             logger.error("Specified file does not exist.")
             return False
@@ -305,7 +334,10 @@ class DatasetEvaluator:
     def evaluate_dataset(self, pickle_path, evaluate_mode='sentence'):
         """Evaluate dataset using various evaluation metrics."""
         
-        # Pre-evaluate checking
+        # pre-test check
+        if self.init_mode_loaded == "light":
+            logger.error("Init Mode needs to set to gen3")
+            return False
         if not os.path.exists(pickle_path):
             logger.error("Specified file does not exist.")
             return False
@@ -390,10 +422,7 @@ class DatasetEvaluator:
             original_stdout = sys.stdout # store original output to suppress warnings
             sys.stdout = open(os.devnull, 'w')
             try:
-                cmeteor_result = self.metric_cmeteor.compute(
-                    predictions=df['zh'].tolist(),
-                    references=df['ref'].tolist()
-                )
+                cmeteor_result = self.metric_cmeteor.compute(predictions=[row['zh']].tolist(), references=[row['ref']].tolist())
             finally:
                 sys.stdout.close()
                 sys.stdout = original_stdout # restore original output
@@ -414,8 +443,8 @@ class DatasetEvaluator:
             logger.info(f"METEOR: {scores['meteor']:.4f}")
             logger.info(f"BERTScore: {scores['bertscore']:.4f}")
             logger.info(f"ChineseMETEOR: {scores['cmeteor']:.4f}")
-            logger.info(f"COMET: {scores['comet']:.4f}")
-            logger.info(f"characTER: {scores['character']:.4f}")
+            logger.info(f"COMET: {df_report['comet'].mean():.4f}")
+            logger.info(f"characTER: {df_report['character'].mean():.4f}")
             return scores
         else:
             logger.error("Unknown evaluation mode")
@@ -423,6 +452,10 @@ class DatasetEvaluator:
 
     def evaluate_dataset_unbabel(self, pickle_path, evaluate_mode='sentence'):
         """Evaluate dataset using Unbabel's COMET models."""
+        # pre-test check
+        if self.init_mode_loaded == "light":
+            logger.error("Init Mode needs to set to gen3")
+            return False
         dataset = self.prepare_dataset(pickle_path)
         unbabel_data = [
             {"src": ex['translation']['yue'].strip(), 
@@ -459,11 +492,16 @@ class DatasetEvaluator:
             logger.error("Unknown evaluate mode")
             return None
 
-    def evaluate_dataset_gen3(self, pickle_path):
+    def evaluate_dataset_gen3_old(self, pickle_path):
         report_data = []
-        
+
+        # pre-test check
+        if self.init_mode_loaded == "light":
+            logger.error("Init Mode needs to set to gen3")
+            return False
+            
         # Load and prepare dataset
-        dataset = self.prepare_dataset(pickle_path)
+        dataset = self.prepare_dataset(self._resolve_path(pickle_path))
         df = pd.DataFrame([ex['translation'] for ex in dataset])
         df = df[['yue', 'zh', 'ref']].apply(lambda x: x.str.strip())
         
@@ -494,6 +532,94 @@ class DatasetEvaluator:
         logger.info(f"TER: {df_report['ter'].mean():.4f}")
         logger.info(f"BLEURT: {df_report['bleurt'].mean():.4f}")
         return df_report
+
+    def evaluate_dataset_gen3(self, pickle_path, batch_size=64):
+        dataset = self.prepare_dataset(pickle_path)
+        df = pd.DataFrame([ex['translation'] for ex in dataset])
+        df = df[['yue', 'zh', 'ref']].apply(lambda x: x.str.strip())
+    
+        preds = df['zh'].tolist()
+        refs  = df['ref'].tolist()
+    
+        # Pre-compute the split versions once
+        split_preds = [' '.join(self._split_keyword(p)) for p in preds]
+        split_refs  = [' '.join(self._split_keyword(r)) for r in refs]
+    
+        # ---- BLEU & chrF++ (sacrebleu / evaluate) ----
+        # Both accept lists of predictions and list-of-lists of references
+        bleu_result = self.metric_bleu.compute(
+           predictions=preds,
+            references=[[r] for r in refs],
+            tokenize="zh"
+        )
+        # Note: corpus-level BLEU is returned; if you need sentence-level scores
+        # use the underlying sacrebleu library or loop with a progress bar only
+        # for the expensive metrics.
+    
+        chrf_result = self.metric_chrf.compute(
+            predictions=preds,
+            references=[[r] for r in refs],
+            word_order=2
+        )
+    
+        # ---- TER ----
+        # The evaluate TER metric also works on lists
+        ter_result = self.metric_ter.compute(
+            predictions=split_preds,
+            references=[[r] for r in split_refs]   # or just list of strings depending on version
+        )
+    
+        # ---- BLEURT (most expensive) ----
+        # BleurtScorer.score accepts lists and is much faster in batch mode
+        bleurt_scores = self.metric_bleurt.score(
+            references=refs,
+            candidates=preds
+            # optional: batch_size=batch_size if the scorer supports it
+        )
+    
+        # Build the report DataFrame
+        report_df = pd.DataFrame({
+            'yue': df['yue'],
+            'zh':  df['zh'],
+            'ref': df['ref'],
+            # For corpus-level metrics you only have one number;
+            # for sentence-level you would store the per-sentence lists
+            'bleu':   bleu_result['score'],      # or per-sentence if available
+            'chrf':   chrf_result['score'],
+            'ter':    ter_result['score'],
+            'bleurt': bleurt_scores,             # list of floats
+        })
+    
+        # Log averages
+        logger.info(f"BLEU:   {report_df['bleu'].mean():.4f}")
+        logger.info(f"chrF++: {report_df['chrf'].mean():.4f}")
+        logger.info(f"TER:    {report_df['ter'].mean():.4f}")
+        logger.info(f"BLEURT: {report_df['bleurt'].mean():.4f}")
+        return report_df
+        
+    def evaluate_dataset_v2_report(self, baseline_pickle, compare_pickle, baseline_tokenizer_path, compare_tokenizer_path):
+        baseline_df = pd.read_pickle(baseline_pickle)
+        compare_df = pd.read_pickle(compare_pickle)
+        report_df = pd.DataFrame({
+            "yue": baseline_df['yue'], 
+            "zh_baseline": baseline_df['zh'],
+            "zh_compare": compare_df['zh'],
+            "ref": baseline_df['ref'],
+            "yue_tokens_baseline": "",
+            "yue_tokens_compare": "",
+            "zh_tokens_baseline": "",
+            "zh_tokens_compare": "",
+            "yue_multitoken_baseline_percent": 0, # must be 0
+            "zh_multitoken_baseline_percent": 0, # must be 0
+            "yue_multitoken_compare_percent": 0, # must be 0
+            "zh_multitoken_compare_percent": 0, # must be 0
+            "bleu_baseline": 0,
+            "blue_compare": 0,
+        })
+        from CCPC_Scripts.transformers_models.build_cantonese_tokenizer import CantoneseBertTokenizer
+        tokenizer_baseline = CantoneseBertTokenizer.from_pretrained(baseline_tokenizer_path)
+        tokenizer_compare = CantoneseBertTokenizer.from_pretrained(compare_tokenizer_path)
+        return report_df
         
     def prepare_dataset(self, pickle_path):
         """Load and prepare dataset from pickle file."""
